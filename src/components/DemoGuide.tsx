@@ -1,39 +1,37 @@
 "use client";
 
 import { useState } from "react";
-import { Card } from "./ui";
+import { ChevronRight } from "lucide-react";
 
 const CASES: [string, string][] = [
-  ["Complete three-agent run", "Create run with the sample input, then Start run. Intake → Planning → Review runs and the Final plan tab shows the approved plan."],
-  ["Rule violation sent back", "Before starting a new run, tick “First plan draft ignores R2”. Review blocks the missing security review; Collaboration shows the corrections and Planning’s round-2 fix."],
-  ["Changed fact propagates", "On a finished run open Source facts, Correct the release-date fact (e.g. to 2026-11-06) and Save & rerun, then Run to completion. Context moves to v2; Planning/Review rerun, Intake is reused."],
-  ["Recovery after model failure", "Tick “Fail next Planning call”, run it: the step fails (labelled SIMULATED). Click Resume run: only Planning retries (attempt 2), Intake is not repeated."],
-  ["Sessions are isolated", "Open this page in a private/incognito window. It gets a different session id and sees none of these runs; their URLs return 404 there."],
+  ["Complete three-agent run", "New run → Standard run → Start run."],
+  ["Rule violation sent back", "New run → Rule violation. Agent exchange shows Review's corrections and Planning's revision."],
+  ["Changed fact propagates", "On a finished run: Source facts → Correct F2 (release date) → Save and rerun."],
+  ["Recovery after model failure", "New run → Model failure. Planning fails; Retry Planning reruns only that step."],
+  ["Sessions are isolated", "Open this page in a private window: a separate session that sees none of these runs."],
 ];
 
 export function DemoGuide() {
   const [open, setOpen] = useState(true);
   return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">How to demo</h2>
-        <button className="text-xs text-sky-700 hover:underline" onClick={() => setOpen(!open)}>
-          {open ? "Hide" : "Show"}
-        </button>
-      </div>
+    <div className="rounded-xl border border-slate-200 bg-white p-3">
+      <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-1.5 text-left text-sm font-semibold text-slate-900">
+        <ChevronRight className={`size-4 text-slate-500 transition ${open ? "rotate-90" : ""}`} />
+        Demo checklist
+      </button>
       {open && (
-        <ol className="mt-2 space-y-2.5 text-xs text-slate-600">
+        <ol className="mt-2 space-y-2.5 pl-1">
           {CASES.map(([title, how], i) => (
-            <li key={title}>
-              <div className="font-medium text-slate-800">
-                {i + 1}. {title}
+            <li key={title} className="flex gap-2.5 text-[13px]">
+              <span className="mt-px grid size-5 shrink-0 place-items-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-700">{i + 1}</span>
+              <div>
+                <div className="font-medium text-slate-900">{title}</div>
+                <div className="text-slate-600">{how}</div>
               </div>
-              {how}
             </li>
           ))}
-          <li className="border-t border-slate-100 pt-2 text-slate-500">Reset (top right) deletes this session’s runs and restores the sample input. A run costs about $0.10–0.20 in model usage.</li>
         </ol>
       )}
-    </Card>
+    </div>
   );
 }

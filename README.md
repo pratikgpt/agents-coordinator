@@ -16,7 +16,7 @@ company rules into a reviewed action plan:
                                                                                          after N rounds
 ```
 
-**Live URL:** _to be added after deployment_ · **Demo:** open the URL; no login needed. A demo checklist in the
+**Live URL:** https://agents-coordinator.vercel.app · **Demo:** open the URL; no login needed. A demo checklist in the
 sidebar walks through every required case.
 
 ## How to demo the required cases

@@ -43,7 +43,7 @@ export function Button({
     danger: "bg-white text-rose-700 ring-1 ring-inset ring-rose-300 hover:bg-rose-50",
   }[variant];
   return (
-    <button type={type} onClick={onClick} disabled={disabled} className={`rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles}`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${styles}`}>
       {children}
     </button>
   );
@@ -78,9 +78,20 @@ export const STATUS_TONE: Record<string, Tone> = {
   waiting: "gray",
 };
 
-export const BASIS_TONE: Record<string, Tone> = {
-  transcript: "green",
-  rule: "blue",
-  recommendation: "violet",
-  unresolved: "amber",
+// Basis is shown as a coloured dot + small label rather than a pill, so a table full of them stays quiet.
+export const BASIS_STYLE: Record<string, { dot: string; text: string; label: string }> = {
+  transcript: { dot: "bg-emerald-500", text: "text-emerald-700", label: "supported by the transcript" },
+  rule: { dot: "bg-sky-500", text: "text-sky-700", label: "required by a company rule" },
+  recommendation: { dot: "bg-violet-500", text: "text-violet-700", label: "agent proposal, not decided" },
+  unresolved: { dot: "bg-amber-500", text: "text-amber-700", label: "open question" },
 };
+
+export function Basis({ basis }: { basis: string }) {
+  const s = BASIS_STYLE[basis];
+  return (
+    <span title={s?.label} className={`inline-flex items-center gap-1 text-[11px] ${s?.text ?? "text-slate-500"}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${s?.dot ?? "bg-slate-400"}`} />
+      {basis}
+    </span>
+  );
+}

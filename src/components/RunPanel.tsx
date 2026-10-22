@@ -3,12 +3,12 @@
 import { useState } from "react";
 import type { RunView, StepRow } from "@/lib/orchestrator";
 import type { Fact, PlanOutput, ReviewIssue, ReviewOutput } from "@/lib/schemas";
-import { Badge, BASIS_TONE, Button, Card, JsonBlock, STATUS_TONE } from "./ui";
+import { Badge, Basis, BASIS_STYLE, Button, Card, JsonBlock, STATUS_TONE } from "./ui";
 
 const AGENTS = [
-  { key: "intake", name: "Intake Agent", role: "Extracts grounded facts and flags gaps" },
-  { key: "planning", name: "Planning Agent", role: "Proposes tasks, owners, deadlines" },
-  { key: "review", name: "Review Agent", role: "Checks plan vs transcript and rules" },
+  { key: "intake", name: "Intake Agent", short: "Intake", role: "Extracts grounded facts and flags gaps" },
+  { key: "planning", name: "Planning Agent", short: "Planning", role: "Proposes tasks, owners, deadlines" },
+  { key: "review", name: "Review Agent", short: "Review", role: "Checks plan vs transcript and rules" },
 ] as const;
 
 type Tab = "plan" | "facts" | "collab" | "log";
@@ -37,25 +37,34 @@ export function RunPanel({
   return (
     <div className="space-y-4">
       <Card className="p-4">
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h2 className="text-base font-semibold">Run {view.run.id.slice(0, 8)}</h2>
           <Badge tone={STATUS_TONE[view.status]}>{view.status.replace("_", " ")}</Badge>
-          <Badge tone="gray" title="Context version: bumps whenever a source fact is corrected">context v{cv}</Badge>
-          <Badge tone="gray">≈ ${view.cost_usd.toFixed(4)} model cost</Badge>
-          <div className="ml-auto flex flex-wrap gap-2">
-            {driving ? (
-              <Button onClick={onStop}>Pause after this step</Button>
-            ) : (
+          <span className="text-xs text-slate-500">
+            {cv > 0 && (
               <>
-                <Button onClick={onRunNext} disabled={finished || view.status === "running"}>
-                  {view.status === "failed" ? "Retry failed step" : "Run next step"}
-                </Button>
-                <Button variant="primary" onClick={onRunAll} disabled={finished || view.status === "running"}>
-                  {view.status === "failed" ? "Resume run" : view.status === "new" ? "Start run" : "Run to completion"}
-                </Button>
+                <span title="Context version: bumps whenever a source fact is corrected">context v{cv}</span>
+                {" · "}
               </>
             )}
-          </div>
+            <span title={`$${view.cost_usd.toFixed(4)} across all model calls in this run`}>${view.cost_usd.toFixed(2)} model cost</span>
+          </span>
+          {(driving || !finished) && (
+            <div className="ml-auto flex flex-wrap gap-2">
+              {driving ? (
+                <Button onClick={onStop}>Pause after this step</Button>
+              ) : (
+                <>
+                  <Button onClick={onRunNext} disabled={view.status === "running"}>
+                    {view.status === "failed" ? "Retry failed step" : "Run next step"}
+                  </Button>
+                  <Button variant="primary" onClick={onRunAll} disabled={view.status === "running"}>
+                    {view.status === "failed" ? "Resume run" : view.status === "new" ? "Start run" : "Run to completion"}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
         </div>
         {view.next.kind === "step" && !finished && (
           <p className="mt-2 text-xs text-slate-500">
@@ -63,26 +72,28 @@ export function RunPanel({
             {view.next.agent !== "intake" && ` · context v${view.next.version} · round ${view.next.round} of ${view.run.max_rounds}`}
           </p>
         )}
+        <Outcome view={view} />
       </Card>
 
       <Pipeline view={view} />
-      <FaultControls view={view} onFaults={onFaults} />
+      <FaultControls view={view} onFaults={onFaults} locked={finished || driving} />
 
       <div className="flex gap-1 overflow-x-auto border-b border-slate-200">
         {(
           [
-            ["plan", "Final plan"],
-            ["facts", `Source facts (v${cv})`],
-            ["collab", `Collaboration (${view.messages.length})`],
-            ["log", "Action log"],
-          ] as [Tab, string][]
-        ).map(([k, label]) => (
+            ["plan", "Final plan", "Plan"],
+            ["facts", `Source facts (v${cv})`, `Facts v${cv}`],
+            ["collab", `Collaboration (${view.messages.length})`, `Collaboration (${view.messages.length})`],
+            ["log", "Action log", "Log"],
+          ] as [Tab, string, string][]
+        ).map(([k, label, short]) => (
           <button
             key={k}
             onClick={() => setTab(k)}
-            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${tab === k ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-800"}`}
+            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-2.5 py-2 text-sm font-medium sm:px-3 ${tab === k ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-800"}`}
           >
-            {label}
+            <span className="sm:hidden">{short}</span>
+            <span className="hidden sm:inline">{label}</span>
           </button>
         ))}
       </div>
@@ -95,6 +106,48 @@ export function RunPanel({
   );
 }
 
+// The plan's bottom line, so "approved" is never read as "nothing left to decide".
+function Outcome({ view }: { view: RunView }) {
+  const plan = view.plan as PlanOutput | null;
+  const review = view.review as ReviewOutput | null;
+  if (!plan) return null;
+  const tasks = plan.tasks;
+  const noOwner = tasks.filter((t) => !t.owner).length;
+  const noDate = tasks.filter((t) => !t.deadline).length;
+  const undecided = tasks.filter((t) => !t.owner || !t.deadline).length;
+  const blocking = review?.issues.filter((i) => i.severity === "blocking").length ?? 0;
+
+  const headline =
+    view.status === "approved"
+      ? undecided
+        ? `Approved: no rule violations or invented facts. ${undecided} of ${tasks.length} tasks still need a human decision on owner or date.`
+        : `Approved: no rule violations or invented facts, and every task has an owner and a date.`
+      : view.status === "needs_attention"
+        ? `Not approved after ${view.run.max_rounds} review rounds: ${blocking} blocking issue${blocking === 1 ? "" : "s"} need a human.`
+        : `Draft plan from round ${view.plan_round}; review ${review ? "requested changes" : "pending"}.`;
+
+  const stats: [number | string, string, boolean][] = [
+    [tasks.length, "tasks", false],
+    [noOwner, "need an owner", noOwner > 0],
+    [noDate, "need a date", noDate > 0],
+    [plan.open_questions.length, "open questions", plan.open_questions.length > 0],
+    [`${view.plan_round ?? "–"} of ${view.run.max_rounds}`, "review rounds used", false],
+  ];
+  return (
+    <div className="mt-3 border-t border-slate-100 pt-3">
+      <p className="text-sm text-slate-700">{headline}</p>
+      <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {stats.map(([value, label, warn]) => (
+          <div key={label} className={`rounded-lg px-3 py-2 ${warn ? "bg-amber-50" : "bg-slate-50"}`}>
+            <dd className={`text-lg font-semibold tabular-nums ${warn ? "text-amber-800" : "text-slate-900"}`}>{value}</dd>
+            <dt className={`text-xs ${warn ? "text-amber-800" : "text-slate-500"}`}>{label}</dt>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 function latestStep(view: RunView, agent: string): StepRow | undefined {
   const cv = view.run.current_version;
   return [...view.steps].reverse().find((s) => s.agent === agent && (agent === "intake" || s.context_version === cv));
@@ -102,38 +155,46 @@ function latestStep(view: RunView, agent: string): StepRow | undefined {
 
 function Pipeline({ view }: { view: RunView }) {
   return (
-    <div className="grid gap-3 md:grid-cols-3">
+    <div className="grid grid-cols-3 gap-2 md:gap-3">
       {AGENTS.map((a, i) => {
         const step = latestStep(view, a.key);
         const isNext = view.next.kind === "step" && view.next.agent === a.key;
         const status = step?.status === "running" ? "running" : step ? step.status : isNext ? "waiting" : "idle";
         const reused = a.key === "intake" && step?.status === "succeeded" && view.run.current_version > 1;
         return (
-          <Card key={a.key} className={`relative p-4 ${status === "running" ? "ring-2 ring-sky-400" : ""}`}>
+          <Card key={a.key} className={`relative min-w-0 p-3 md:p-4 ${status === "running" ? "ring-2 ring-sky-400" : ""}`}>
             {i < 2 && <span className="absolute -right-3 top-1/2 z-10 hidden -translate-y-1/2 text-slate-400 md:block">→</span>}
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex flex-col items-start gap-1.5 md:flex-row md:justify-between md:gap-2">
               <div>
-                <div className="text-sm font-semibold">{a.name}</div>
-                <div className="text-xs text-slate-500">{a.role}</div>
+                <div className="text-sm font-semibold">
+                  <span className="md:hidden">{a.short}</span>
+                  <span className="hidden md:inline">{a.name}</span>
+                </div>
+                <div className="hidden text-xs text-slate-500 md:block">{a.role}</div>
               </div>
               <Badge tone={STATUS_TONE[status] ?? "gray"}>
                 {status === "running" && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />}
                 {status}
               </Badge>
             </div>
+            {step?.error && <div className="mt-2 rounded bg-rose-50 p-2 text-xs text-rose-800">{step.error}</div>}
             {step && (
-              <div className="mt-3 space-y-1 text-xs text-slate-600">
-                {a.key !== "intake" && (
-                  <div>
-                    context v{step.context_version} · round {step.round}
+              <div className="mt-3 hidden space-y-0.5 text-xs text-slate-600 md:block">
+                <div>
+                  {a.key !== "intake" && `v${step.context_version} · round ${step.round} · `}attempt {step.attempts}
+                </div>
+                {step.usage && (
+                  <div className="tabular-nums">
+                    {(step.usage.prompt_tokens + step.usage.completion_tokens).toLocaleString()} tokens
+                    {step.usage.cost_usd != null && ` · $${step.usage.cost_usd.toFixed(3)}`}
                   </div>
                 )}
-                <div>
-                  attempts: {step.attempts}
-                  {step.usage && ` · ${step.usage.prompt_tokens + step.usage.completion_tokens} tokens · ${step.usage.model}`}
-                </div>
+                {step.usage && (
+                  <div className="truncate font-mono text-[11px] text-slate-400" title={step.usage.model}>
+                    {step.usage.model}
+                  </div>
+                )}
                 {reused && <div className="text-emerald-700">Output reused for v{view.run.current_version} (only facts changed)</div>}
-                {step.error && <div className="rounded bg-rose-50 p-2 text-rose-800">{step.error}</div>}
                 <JsonBlock label="Input" value={step.input} />
                 {step.output != null && <JsonBlock label="Output" value={step.output} />}
               </div>
@@ -145,7 +206,7 @@ function Pipeline({ view }: { view: RunView }) {
   );
 }
 
-function FaultControls({ view, onFaults }: { view: RunView; onFaults: (f: RunView["run"]["faults"]) => void }) {
+function FaultControls({ view, onFaults, locked }: { view: RunView; onFaults: (f: RunView["run"]["faults"]) => void; locked: boolean }) {
   const f = view.run.faults;
   const toggle = (k: keyof typeof f) => onFaults({ ...f, [k]: !f[k] });
   const items: [keyof typeof f, string][] = [
@@ -154,6 +215,16 @@ function FaultControls({ view, onFaults }: { view: RunView; onFaults: (f: RunVie
     ["fail_review", "Fail next Review call"],
     ["rule_violation", "First plan draft ignores R2 (v1, round 1 only)"],
   ];
+  // Toggling has no effect while a step is executing or once the run is finished, so show what was armed instead.
+  if (locked) {
+    const armed = items.filter(([k]) => f[k]).map(([, label]) => label);
+    if (!armed.length) return null;
+    return (
+      <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 px-4 py-2 text-xs text-amber-900">
+        <span className="font-semibold">SIMULATED FAULT</span> armed in this run: {armed.join(", ")}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-dashed border-amber-300 bg-amber-50/60 px-4 py-2 text-xs">
       <span className="font-semibold text-amber-900">SIMULATED FAULTS</span>
@@ -175,27 +246,47 @@ function PlanView({ view }: { view: RunView }) {
 
   return (
     <div className="space-y-4">
-      {review && (
-        <Card className={`p-4 ${review.approved ? "border-emerald-300" : "border-amber-300"}`}>
-          <div className="flex items-center gap-2">
-            <Badge tone={review.approved ? "green" : "amber"}>{review.approved ? "Approved by Review Agent" : "Not approved"}</Badge>
-            <span className="text-xs text-slate-500">
-              plan round {view.plan_round} · context v{view.run.current_version}
-            </span>
-          </div>
-          <p className="mt-2 text-sm text-slate-700">{review.summary}</p>
-          {view.status === "needs_attention" && (
-            <div className="mt-3">
-              <div className="text-sm font-semibold text-amber-900">Unresolved after {view.run.max_rounds} rounds — needs a human:</div>
-              <IssueList issues={review.issues.filter((i) => i.severity === "blocking")} />
-            </div>
-          )}
-          {review.approved && review.issues.length > 0 && <IssueList issues={review.issues} />}
-        </Card>
-      )}
+      {review && <ReviewVerdict view={view} review={review} />}
 
       <Card className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-sm">
+        {/* Phones get one stacked card per task; the table needs ~760px. */}
+        <ul className="divide-y divide-slate-100 md:hidden">
+          {plan.tasks.map((t) => (
+            <li key={t.id} className="p-3 text-sm">
+              <div>
+                <span className="mr-1 font-mono text-xs text-slate-400">{t.id}</span>
+                {t.title}
+              </div>
+              <div className="mt-1.5 grid grid-cols-2 gap-2">
+                <div>
+                  {t.owner ? (
+                    <>
+                      <div>{t.owner}</div>
+                      <Basis basis={t.owner_basis} />
+                    </>
+                  ) : (
+                    <Missing text="Needs owner" />
+                  )}
+                </div>
+                <div>
+                  {t.deadline ? (
+                    <>
+                      <div className="tabular-nums">{t.deadline}</div>
+                      <Basis basis={t.deadline_basis} />
+                    </>
+                  ) : (
+                    <Missing text="Needs date" />
+                  )}
+                </div>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {t.depends_on.length > 0 && `after ${t.depends_on.join(", ")} · `}
+                <span className="font-mono">{[...t.source_fact_ids, ...t.rule_refs].join(" ")}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <table className="hidden w-full min-w-[760px] text-left text-sm md:table">
           <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-3 py-2">Task</th>
@@ -213,12 +304,24 @@ function PlanView({ view }: { view: RunView }) {
                   {t.title}
                 </td>
                 <td className="px-3 py-2">
-                  <div>{t.owner ?? <span className="text-slate-400">unassigned</span>}</div>
-                  <Badge tone={BASIS_TONE[t.owner_basis]}>{t.owner_basis}</Badge>
+                  {t.owner ? (
+                    <>
+                      <div>{t.owner}</div>
+                      <Basis basis={t.owner_basis} />
+                    </>
+                  ) : (
+                    <Missing text="Needs owner" />
+                  )}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap">
-                  <div>{t.deadline ?? <span className="text-slate-400">none</span>}</div>
-                  <Badge tone={BASIS_TONE[t.deadline_basis]}>{t.deadline_basis}</Badge>
+                  {t.deadline ? (
+                    <>
+                      <div className="tabular-nums">{t.deadline}</div>
+                      <Basis basis={t.deadline_basis} />
+                    </>
+                  ) : (
+                    <Missing text="Needs date" />
+                  )}
                 </td>
                 <td className="px-3 py-2 font-mono text-xs">{t.depends_on.join(", ") || "—"}</td>
                 <td className="px-3 py-2 text-xs">
@@ -237,11 +340,14 @@ function PlanView({ view }: { view: RunView }) {
             ))}
           </tbody>
         </table>
-        <div className="flex flex-wrap gap-3 border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
-          Basis: <Badge tone="green">transcript = supported fact</Badge>
-          <Badge tone="blue">rule = required by policy</Badge>
-          <Badge tone="violet">recommendation = agent proposal</Badge>
-          <Badge tone="amber">unresolved = open question</Badge>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
+          <span>Where each owner and date comes from:</span>
+          {Object.entries(BASIS_STYLE).map(([k, s]) => (
+            <span key={k} className="inline-flex items-center gap-1">
+              <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+              <span className={s.text}>{k}</span> = {s.label}
+            </span>
+          ))}
         </div>
       </Card>
 
@@ -272,6 +378,40 @@ function PlanView({ view }: { view: RunView }) {
         </Card>
       </div>
     </div>
+  );
+}
+
+function Missing({ text }: { text: string }) {
+  return (
+    <span title="Not agreed in the meeting, so left open rather than guessed" className="text-xs font-medium text-amber-700">
+      {text}
+    </span>
+  );
+}
+
+function ReviewVerdict({ view, review }: { view: RunView; review: ReviewOutput }) {
+  const [more, setMore] = useState(false);
+  const notes = review.issues.length;
+  return (
+    <Card className={`p-4 ${review.approved ? "border-emerald-300" : "border-amber-300"}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={review.approved ? "green" : "amber"}>{review.approved ? "Approved by Review Agent" : "Not approved"}</Badge>
+        <span className="text-xs text-slate-500">
+          plan round {view.plan_round} · context v{view.run.current_version}
+        </span>
+        <button onClick={() => setMore(!more)} className="ml-auto text-xs font-medium text-sky-700 hover:underline">
+          {more ? "Show less" : review.approved && notes ? `Full review · ${notes} minor note${notes === 1 ? "" : "s"}` : "Full review"}
+        </button>
+      </div>
+      <p className={`mt-2 text-sm text-slate-700 ${more ? "" : "line-clamp-2"}`}>{review.summary}</p>
+      {view.status === "needs_attention" && (
+        <div className="mt-3">
+          <div className="text-sm font-semibold text-amber-900">Unresolved after {view.run.max_rounds} rounds — needs a human:</div>
+          <IssueList issues={review.issues.filter((i) => i.severity === "blocking")} />
+        </div>
+      )}
+      {more && review.approved && notes > 0 && <IssueList issues={review.issues} />}
+    </Card>
   );
 }
 

@@ -41,15 +41,17 @@ export default function Home() {
   const [showForm, setShowForm] = useState(true);
   const stopRef = useRef(false);
 
-  const refreshRuns = useCallback(
-    async () => setRuns(await api<RunSummary[]>("/api/runs")),
-    [],
-  );
+  const refreshRuns = useCallback(async () => {
+    const list = await api<RunSummary[]>("/api/runs");
+    setRuns(list);
+    return list;
+  }, []);
 
   useEffect(() => {
     api<{ session_id: string }>("/api/session")
       .then((s) => setSessionId(s.session_id))
       .then(refreshRuns)
+      .then((list) => list.length && setShowForm(false)) // returning visitor: lead with their runs, not the input form
       .catch((e) => setError(e.message));
   }, [refreshRuns]);
 
@@ -153,12 +155,14 @@ export default function Home() {
             </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <span
-              className="rounded-md bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600"
-              title="Private to this browser. Open an incognito window to get a separate session."
-            >
-              session {sessionId.slice(0, 8) || "…"}
-            </span>
+            {sessionId && (
+              <span
+                className="rounded-md bg-slate-100 px-2 py-1 font-mono text-xs text-slate-600"
+                title="Private to this browser. Open an incognito window to get a separate session."
+              >
+                session {sessionId.slice(0, 8)}
+              </span>
+            )}
             <Button variant="danger" onClick={reset}>
               Reset
             </Button>
@@ -166,7 +170,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[340px_1fr]">
+      <main className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[320px_1fr]">
         <aside className="space-y-4">
           <Card className="p-4">
             <div className="flex items-center justify-between">
@@ -175,9 +179,22 @@ export default function Home() {
                 className="text-xs text-sky-700 hover:underline"
                 onClick={() => setShowForm(!showForm)}
               >
-                {showForm ? "Hide" : "Show"}
+                {showForm ? "Hide input" : "Edit input"}
               </button>
             </div>
+            {!showForm && (
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <p className="text-xs text-slate-500">
+                  {transcript === SAMPLE_TRANSCRIPT &&
+                  rulesText === SAMPLE_RULES_TEXT
+                    ? "Sample transcript and company rules"
+                    : "Your edited transcript and rules"}
+                </p>
+                <Button variant="primary" onClick={startRun}>
+                  Create run
+                </Button>
+              </div>
+            )}
             {showForm && (
               <div className="mt-3 space-y-3">
                 <label className="block text-xs font-medium text-slate-600">
@@ -222,12 +239,10 @@ export default function Home() {
                 <li key={r.id}>
                   <button
                     onClick={() => guard(() => load(r.id))}
-                    className={`w-full rounded-lg px-2 py-1.5 text-left text-sm ${selected === r.id ? "bg-slate-900 text-white" : "hover:bg-slate-100"}`}
+                    className={`w-full rounded-lg px-2 py-1.5 text-left text-sm ${selected === r.id ? "bg-slate-100 font-medium ring-1 ring-inset ring-slate-300" : "hover:bg-slate-50"}`}
                   >
                     <span className="font-mono">{r.id.slice(0, 8)}</span>
-                    <span
-                      className={`ml-2 text-xs ${selected === r.id ? "text-slate-300" : "text-slate-500"}`}
-                    >
+                    <span className="ml-2 text-xs font-normal text-slate-500">
                       {new Date(r.created_at).toLocaleTimeString()} · v
                       {r.current_version} · {r.step_count} steps
                     </span>
@@ -243,7 +258,9 @@ export default function Home() {
           {view && <DemoGuide />}
         </aside>
 
-        <section className="min-w-0 space-y-3">
+        <section
+          className={`min-w-0 space-y-3 ${view ? "order-first lg:order-none" : ""}`}
+        >
           {error && (
             <div className="flex items-start justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
               <span className="whitespace-pre-wrap">{error}</span>

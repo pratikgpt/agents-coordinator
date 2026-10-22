@@ -16,20 +16,29 @@ company rules into a reviewed action plan:
                                                                                          after N rounds
 ```
 
-**Live URL:** _to be added after deployment_ · **Demo:** open the URL; no login needed. A "How to demo" panel in the
+**Live URL:** _to be added after deployment_ · **Demo:** open the URL; no login needed. A demo checklist in the
 sidebar walks through every required case.
 
 ## How to demo the required cases
 
 | Case | Steps in the UI |
 |---|---|
-| Complete three-agent run | **Create run** (sample input is preloaded) → **Start run**. Final plan tab shows the approved plan. |
-| Rule violation sent back for correction | On a new run, tick **SIMULATED FAULTS → First plan draft ignores R2** before starting. Review blocks the missing security review (R2); **Collaboration** shows the corrections and the round-2 fix. |
-| Changed source fact propagates | On a finished run: **Source facts → Correct** the release-date fact (F2) to `2026-11-06` → **Save & rerun** → **Run to completion**. Context goes to v2, Planning and Review rerun, Intake is reused; deadlines move. |
-| Recovery after simulated model failure | Tick **Fail next Planning call**, start. Planning fails (labelled `[SIMULATED FAULT]`). **Resume run** retries only Planning (attempt 2); Intake is not re-executed or re-billed. |
+| Complete three-agent run | **New run** → **Standard run** → **Start run** (sample input is preloaded). The run header shows the verdict and what is still undecided; the **Plan** tab shows the plan. |
+| Rule violation sent back for correction | **New run** → **Rule violation** (simulated). **Agent exchange** shows Review's blocking corrections for draft 1 and the changes Planning made in draft 2. |
+| Changed source fact propagates | On a finished run: **Source facts** → **Correct** the release-date fact (F2), e.g. to `2026-11-06` → **Save and rerun**. Context goes to v2, Planning and Review rerun automatically, Intake is reused; deadlines move. |
+| Recovery after simulated model failure | **New run** → **Model failure** (simulated). Planning fails with a labelled simulated fault; **Retry Planning** reruns only Planning (attempt 2). The failed attempt stays visible in **Agent exchange**. |
 | Sessions don't share private context | Open the app in a private window: different session id, no runs visible, and other sessions' run URLs return 404. |
 
-All simulated faults are opt-in toggles inside a dashed **SIMULATED FAULTS** bar and every injected failure message starts with `[SIMULATED FAULT]`.
+Simulated faults are opt-in (a scenario on **New run**, or **Simulate failure** on an unfinished run) and are tagged
+**Simulated** everywhere they appear: the scenario card, the run header, the failure message, the timeline and the log.
+
+### UI design
+
+The run view leads with the outcome (status, verdict, how many tasks still need an owner or date) and keeps detail
+one step away: selecting an agent shows what it **received** and **produced** in plain language, with the raw JSON
+behind a disclosure. Owners and dates carry a coloured marker for where they came from (meeting, company rule, agent
+proposal, open question), and missing ones read "Needs owner" / "Needs date" instead of being guessed. The open run
+is kept in the URL, so a refresh returns to it.
 
 ## Architecture
 
@@ -142,7 +151,7 @@ Measured with `anthropic/claude-sonnet-5.5` via OpenRouter ($2 / $10 per million
 
 ## A bug I diagnosed
 
-While walking through the UI with a headless browser, clicking a **SIMULATED FAULTS** checkbox appeared to do
+While walking through the UI with a headless browser, clicking a simulated-fault checkbox appeared to do
 nothing. The checkbox was controlled by the run state from the server, so it only flipped after the
 `/faults` request returned, and the automated `check()` failed. The fix was an optimistic update: set the faults
 locally on click, then reconcile with the server's response (`src/app/page.tsx`).

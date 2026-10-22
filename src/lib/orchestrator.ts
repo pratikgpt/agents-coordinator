@@ -103,12 +103,43 @@ export async function ensureSession(sessionId: string) {
   await sql`insert into sessions (id) values (${sessionId}) on conflict do nothing`;
 }
 
+export type RunStatus = "new" | "ready" | "running" | "failed" | "approved" | "needs_attention";
+
+type StatusStep = Pick<StepRow, "step_key" | "status" | "output" | "agent" | "context_version">;
+
+function runStatus(steps: StatusStep[], currentVersion: number, maxRounds: number): { status: RunStatus; next: Action } {
+  const next = nextAction(steps, currentVersion, maxRounds);
+  const live = (s: StatusStep) => s.agent === "intake" || s.context_version === currentVersion;
+  const pending = next.kind === "step" ? steps.find((s) => s.step_key === stepKey(next.agent, next.version, next.round)) : undefined;
+  let status: RunStatus;
+  if (steps.some((s) => s.status === "running" && live(s))) status = "running";
+  else if (next.kind === "done") status = next.approved ? "approved" : "needs_attention";
+  else if (pending?.status === "failed") status = "failed";
+  else status = steps.length ? "ready" : "new";
+  return { status, next };
+}
+
+/** First non-empty transcript line, used as a human-readable run title. */
+const runTitle = (transcript: string) => (transcript.split("\n").find((l) => l.trim()) ?? "Untitled run").trim().slice(0, 90);
+
 export async function listRuns(sessionId: string) {
   await ensureSchema();
-  return sql`
-    select r.id, r.created_at, r.current_version,
-      (select count(*)::int from steps s where s.run_id = r.id) as step_count
-    from runs r where r.session_id = ${sessionId} order by r.created_at desc`;
+  const runs = await sql<RunRow[]>`select * from runs where session_id = ${sessionId} order by created_at desc`;
+  const steps = runs.length
+    ? await sql<(StatusStep & { run_id: string })[]>`
+        select run_id, step_key, status, output, agent, context_version from steps
+        where run_id = any(${runs.map((r) => r.id)}::uuid[])`
+    : [];
+  return runs.map((r) => ({
+    id: r.id,
+    created_at: r.created_at,
+    title: runTitle(r.transcript),
+    status: runStatus(
+      steps.filter((s) => s.run_id === r.id),
+      r.current_version,
+      r.max_rounds,
+    ).status,
+  }));
 }
 
 export async function createRun(sessionId: string, transcript: string, rules: CompanyRules, faults: Faults) {
@@ -142,15 +173,8 @@ export async function getRunView(sessionId: string, runId: string) {
     sql`select id, kind, from_agent, to_agent, context_version, payload, created_at from messages where run_id = ${runId} order by id`,
     sql`select id, level, text, created_at from events where run_id = ${runId} order by id`,
   ]);
-  const action = nextAction(steps, run.current_version, run.max_rounds);
+  const { status, next: action } = runStatus(steps, run.current_version, run.max_rounds);
   const live = (s: StepRow) => s.agent === "intake" || s.context_version === run.current_version;
-  const pending = action.kind === "step" ? steps.find((s) => s.step_key === stepKey(action.agent, action.version, action.round)) : undefined;
-
-  let status: "new" | "ready" | "running" | "failed" | "approved" | "needs_attention";
-  if (steps.some((s) => s.status === "running" && live(s))) status = "running";
-  else if (action.kind === "done") status = action.approved ? "approved" : "needs_attention";
-  else if (pending?.status === "failed") status = "failed";
-  else status = steps.length ? "ready" : "new";
 
   const current = steps.filter((s) => live(s) && s.status === "succeeded" && s.agent !== "intake");
   const latestPlan = [...current].reverse().find((s) => s.agent === "planning");
@@ -158,7 +182,7 @@ export async function getRunView(sessionId: string, runId: string) {
   const cost = steps.reduce((sum, s) => sum + (s.usage?.cost_usd ?? 0), 0);
 
   return {
-    run: { id: run.id, created_at: run.created_at, current_version: run.current_version, max_rounds: run.max_rounds, faults: run.faults, transcript: run.transcript, rules: run.rules },
+    run: { id: run.id, title: runTitle(run.transcript), created_at: run.created_at, current_version: run.current_version, max_rounds: run.max_rounds, faults: run.faults, transcript: run.transcript, rules: run.rules },
     status,
     next: action,
     versions,
